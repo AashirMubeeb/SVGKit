@@ -15,90 +15,16 @@
 
 - (CALayer *) newLayer
 {
-	/**
-	 BY DESIGN: we work out the positions of all text in ABSOLUTE space, and then construct the Apple CALayers and CATextLayers around
-	 them, as required.
-	 
-	 Because: Apple's classes REQUIRE us to provide a lot of this info up-front. Sigh
-	 And: SVGKit works by pre-baking everything into position (its faster, and avoids Apple's broken CALayer.transform property)
-	 */
-    if (self.x.valueAsString.length != 0 || self.y.valueAsString.length != 0)
-    {
-        // Simplify checks for x and y values being empty or not.
-        NSString *xValue = [self stringValueOrFormatted:self.x.valueAsString withValue:self.x.value];
-        NSString *yValue = [self stringValueOrFormatted:self.y.valueAsString withValue:self.y.value];
-        
-        // Split the text based on the provided X and Y values.
-        NSArray<NSDictionary *> *splitItem = [self splitText:self.textContent basedOnX:xValue andY:yValue];
-        // If no split is needed, create a layer using the entire text content.
-        if (splitItem == nil) {
-            return [self newSubLayerWithX:self.x y:self.y textContent:self.textContent];
-        }
-        // If splitting is needed, create a parent layer and add sublayers for each text segment.
-        CALayer *layer = [CALayer new];
-        for (NSDictionary *item in splitItem)
-        {
-            CALayer *subLayer = [self newSubLayerWithX:[SVGLength svgLengthFromNSString:item[@"x"]]
-                                                    y:[SVGLength svgLengthFromNSString:item[@"y"]]
-                                          textContent:item[@"text"]];
-            [layer addSublayer:subLayer];
-        }
-        return layer;
-    }
-    
-    // If no position is specified, create a layer using the current X and Y values and the entire text content.
-    return [self newSubLayerWithX:self.x y:self.y textContent:self.textContent];
-}
-
-/// Helper method to return the string value or its formatted version if empty.
-- (NSString *)stringValueOrFormatted:(NSString *)valueString withValue:(CGFloat)value
-{
-    return valueString.length > 0 ? valueString : [NSString stringWithFormat:@"%f", value];
-}
-
-/// Method to split the text into segments based on X and Y position strings.
-/// This allows for text to be distributed across different positions if specified.
-- (NSArray<NSDictionary *> *)splitText:(NSString *)text basedOnX:(NSString *)xString andY:(NSString *)yString
-{
-    // Separate the X and Y position strings into arrays of individual positions.
-    NSArray *xValues = [xString componentsSeparatedByString:@" "];
-    NSArray *yValues = [yString componentsSeparatedByString:@" "];
-    // Determine the number of splits based on the greater count of X or Y positions.
-    NSInteger splitCount = MAX(xValues.count, yValues.count);
-    if (splitCount == 0) {
-        return nil; // If no splitting is needed, return nil.
-    }
-
-    // Prepare an array to hold the results of the split.
-    NSMutableArray<NSDictionary *> *result = [NSMutableArray array];
-
-    NSString *previousNonNullableX = @"";
-    NSString *previousNonNullableY = @"";
-    for (NSInteger i = 0; i < splitCount; i++) {
-        // Use the current or previous non-empty X and Y positions.
-        NSString *xPart = i < xValues.count ? xValues[i] : previousNonNullableX;
-        previousNonNullableX = xPart;
-        NSString *yPart = i < yValues.count ? yValues[i] : previousNonNullableY;
-        previousNonNullableY = yPart;
-        
-        // Split the text into parts according to the current index and remaining length.
-        NSString *textPart = @"";
-        if (i < text.length) {
-            NSRange range = NSMakeRange(i, i == (splitCount - 1) ? (text.length - i) : 1);
-            textPart = [text substringWithRange:range];
-        }
-
-        // Create a dictionary for each text segment with its corresponding X and Y positions.
-        NSDictionary *dict = @{@"x": xPart, @"y": yPart, @"text": textPart};
-        [result addObject:dict];
-    }
-
-    return result; // Return the array of dictionaries containing split text and positions.
-}
-
-- (CALayer *) newSubLayerWithX:(SVGLength *)x y:(SVGLength *)y textContent:(NSString *)textContent
-{
+    /**
+     BY DESIGN: we work out the positions of all text in ABSOLUTE space, and then construct the Apple CALayers and CATextLayers around
+     them, as required.
+     
+     Because: Apple's classes REQUIRE us to provide a lot of this info up-front. Sigh
+     And: SVGKit works by pre-baking everything into position (its faster, and avoids Apple's broken CALayer.transform property)
+     */
     CGAffineTransform textTransformAbsolute = [SVGHelperUtilities transformAbsoluteIncludingViewportForTransformableOrViewportEstablishingElement:self];
+    
+   
     /** add on the local x,y that will NOT BE iNCLUDED IN THE TRANSFORM
      AUTOMATICALLY BECAUSE THEY ARE NOT TRANSFORM COMMANDS IN SVG SPEC!!
      -- but they ARE part of the "implicit transform" of text elements!! (bad SVG Spec design :( )
@@ -106,7 +32,7 @@
      NB: the local bits (x/y offset) have to be pre-transformed by
      */
     CGRect viewport = CGRectFromSVGRect(self.rootOfCurrentDocumentFragment.viewBox);
-    CGAffineTransform textTransformAbsoluteWithLocalPositionOffset = CGAffineTransformConcat( CGAffineTransformMakeTranslation( [x pixelsValueWithDimension:viewport.size.width], [y pixelsValueWithDimension:viewport.size.height]), textTransformAbsolute);
+    CGAffineTransform textTransformAbsoluteWithLocalPositionOffset = CGAffineTransformConcat( CGAffineTransformMakeTranslation( [self.x pixelsValueWithDimension:viewport.size.width], [self.y pixelsValueWithDimension:viewport.size.height]), textTransformAbsolute);
     
     /**
      Apple's CATextLayer is poor - one of those classes Apple hasn't finished writing?
@@ -125,6 +51,8 @@
     /**
      Create font based on many information (font-family, font-weight, etc), fallback to system font when there are no available font matching the information.
      */
+    NSString *actualFamily = [self cascadedValueForStylableProperty:@"font-family"];
+    NSArray<NSString *> *actualFontFamilies = [SVGTextElement fontFamiliesWithCSSValue:actualFamily];
     UIFont *font = [SVGTextElement matchedFontWithElement:self];
     
     /** Convert the size down using the SVG transform at this point, before we calc the frame size etc */
@@ -132,7 +60,7 @@
 
     /** Convert all whitespace to spaces, and trim leading/trailing (SVG doesn't support leading/trailing whitespace, and doesnt support CR LF etc) */
     
-    NSString* effectiveText = textContent;
+    NSString* effectiveText = self.textContent; // FIXME: this is a TEMPORARY HACK, UNTIL PROPER PARSING OF <TSPAN> ELEMENTS IS ADDED
     
     effectiveText = [effectiveText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     effectiveText = [effectiveText stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
@@ -246,7 +174,51 @@
     else
         label.anchorPoint = CGPointZero; // WARNING: SVG applies transforms around the top-left as origin, whereas Apple defaults to center as origin, so we tell Apple to work "like SVG" here.
     
-    label.affineTransform = textTransformAbsoluteWithLocalPositionOffset;
+   // label.anchorPoint = CGPointMake(0.5, 0.0);
+    
+    
+   
+    CGFloat angle = atan2f(textTransformAbsoluteWithLocalPositionOffset.b, textTransformAbsoluteWithLocalPositionOffset.a);
+   // label.affineTransform = textTransformAbsoluteWithLocalPositionOffset;
+   // label.affineTransform = textTransformAbsoluteWithLocalPositionOffset;
+    CGAffineTransform  newTrans = CGAffineTransformRotate(textTransformAbsoluteWithLocalPositionOffset, -angle);
+
+//    CGFloat scale = sqrt(newTrans.a * newTrans.a + newTrans.c * newTrans.c);
+//    CGFloat x1 = newTrans.tx;
+//    CGFloat y1 = newTrans.ty;
+//
+//    CGFloat xc = ( label.frame.size.width / 2) * scale;
+//    CGFloat yc = ( label.frame.size.height / 2) * scale ;
+//
+//    CGFloat xt = x1 - xc;
+//    CGFloat yt = y1 - yc;
+//
+//    CGFloat c = cos(-angle); // compute trig. functions only once
+//    CGFloat s = sin(-angle);
+//
+//    CGFloat xr = xt * c - yt * s;
+//    CGFloat yr = xt * s + yt * c;
+//
+//    CGFloat x2 = xr + xc;
+//    CGFloat y2 = yr + yc;
+    
+//    x2 = x2 - x2 * scale;
+//    y2 = y2 - y2 * scale;
+    
+   // "matrix(sx, 0, 0, sy, cx-sx*cx, cy-sy*cy)"
+    
+    
+    
+   // newTrans.tx = x2 ;
+   // newTrans.ty = y2 ;
+   
+   // newTrans = CGAffineTransformRotate(newTrans, -angle);
+    
+    //[label setAnchorPoint:CGPointMake(0.5, 0.5)];
+    label.affineTransform = newTrans;
+    
+    
+    
     label.string = [attributedString copy];
     label.alignmentMode = kCAAlignmentLeft;
     
@@ -256,7 +228,27 @@
     label.contentsScale = [[UIScreen mainScreen] scale];
 #endif
     
-    return [self newCALayerForTextLayer:label transformAbsolute:textTransformAbsolute];
+    CALayer *finalLayer = [self newCALayerForTextLayer:label transformAbsolute:textTransformAbsolute];
+
+    
+        [finalLayer setValue:[self cascadedValueForStylableProperty:@"customRotate"] forKey:@"customRotate"];
+        [finalLayer setValue:[self cascadedValueForStylableProperty:@"customX"] forKey:@"customX"];
+        [finalLayer setValue:[self cascadedValueForStylableProperty:@"customY"] forKey:@"customY"];
+    
+    //[finalLayer setValue:[self cascadedValueForStylableProperty:@"CUSTOMANGLE"] forKey:@"customRotat"];
+    
+    //if( [self cascadedValueForStylableProperty:@"customRotat"] == nil){
+      //  if (angle != 0) {
+//            [finalLayer setValue: @(angle).stringValue forKey:@"customRotat"];
+//            [finalLayer setValue: @"left" forKey:@"layerAncher"];
+        //}
+ //   }
+    
+    [finalLayer setValue:actualFontFamilies.firstObject forKey:@"actualFont"];
+    
+        return finalLayer;
+    //return [self newCALayerForTextLayer:label transformAbsolute:textTransformAbsolute];
+
     /** VERY USEFUL when trying to debug text issues:
     label.backgroundColor = [UIColor colorWithRed:0.5 green:0 blue:0 alpha:0.5].CGColor;
     label.borderColor = [UIColor redColor].CGColor;
@@ -316,16 +308,24 @@
         // walkthrough all available font-families to find the best matched one
         NSSet<NSString *> *availableFontFamilies;
 #if SVGKIT_MAC
-        availableFontFamilies = [NSSet setWithArray:NSFontManager.sharedFontManager.availableFontFamilies];
-#else
-        availableFontFamilies = [NSSet setWithArray:UIFont.familyNames];
-#endif
+        availableFontFamilies = [NSSet setWithArray:NSFontManager.sharedFontManager.availableFonts];
         for (NSString *fontFamily in actualFontFamilies) {
-            if ([availableFontFamilies containsObject:fontFamily]) {
-                matchedFontFamily = fontFamily;
+            
+            NSString *trimmedFontFamily = [fontFamily stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+
+            if ([availableFontFamilies containsObject:trimmedFontFamily]) {
+                matchedFontFamily = trimmedFontFamily;
                 break;
             }
+
+
         }
+#else
+        availableFontFamilies = [NSSet setWithArray:UIFont.familyNames];
+        matchedFontFamily = actualFontFamilies.firstObject;
+        
+#endif
+ 
     }
     
     // we provide enough hint information, let Core Text using their algorithm to detect which fontName should be used
@@ -333,9 +333,14 @@
     NSDictionary *attributes = [self fontAttributesWithFontFamily:matchedFontFamily fontStyle:actualFontStyle fontWeight:actualFontWeight fontStretch:actualFontStretch];
     CTFontDescriptorRef descriptor = CTFontDescriptorCreateWithAttributes((__bridge CFDictionaryRef)attributes);
     CTFontRef fontRef = CTFontCreateWithFontDescriptor(descriptor, effectiveFontSize, NULL);
-    UIFont *font = (__bridge_transfer UIFont *)fontRef;
+    //UIFont *font = (__bridge_transfer UIFont *)fontRef;
+    UIFont *font = [UIFont fontWithName:matchedFontFamily size: effectiveFontSize];
+    if (font != nil) {
+        return font;
+    }else {
+        return  [UIFont systemFontOfSize:effectiveFontSize];
+    }
     
-    return font;
 }
 
 /**
@@ -424,7 +429,7 @@
         // delete ""
         NSString *fontFamily = [arg stringByReplacingOccurrencesOfString:@"\"" withString:@""];
         // trim white space
-        fontFamily = [fontFamily stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        [fontFamily stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         [fontFamilies addObject:fontFamily];
     }
     
@@ -443,7 +448,9 @@
 
 - (void)layoutLayer:(CALayer *)layer
 {
-	
+    
 }
 
 @end
+
+
